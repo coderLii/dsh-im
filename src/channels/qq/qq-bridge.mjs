@@ -1418,10 +1418,7 @@ export class QqHarnessBridge {
         ]);
       }
       this.#signal?.throwIfAborted();
-      const answerText = answerTextForDelivery(answer, artifacts);
-      const displayAnswer = toolErrors.length > 0
-        ? `${answerText}\n\n---\n\n${toolErrors.join('\n\n')}`
-        : answerText;
+      const displayAnswer = answerTextForDelivery(answer, artifacts);
       let textReceipt = null;
       let textSendError = null;
       try {

@@ -1179,7 +1179,7 @@ test('QQ group messages suppress every successful progress update', async () => 
   assert.equal(streamCalls, 0);
 });
 
-test('QQ group messages append a stable tool failure notice without exposing provider details', async () => {
+test('QQ group messages deliver only the final answer when a tool fails', async () => {
   const sent = [];
   const bridge = new QqHarnessBridge({
     bot: {
@@ -1219,13 +1219,11 @@ test('QQ group messages append a stable tool failure notice without exposing pro
     messageId: 'msg-tool-error',
     replyTarget: { scope: 'group', targetId: 'group-error', msgId: 'msg-tool-error' },
   }));
-  assert.deepEqual(sent, [
-    '已存入两套记忆。\n\n---\n\n工具调用「add_observations」未成功，请检查工具配置或稍后重试。',
-  ]);
-  assert.doesNotMatch(sent[0], /Error calling|Status code|404/);
+  assert.deepEqual(sent, ['已存入两套记忆。']);
+  assert.doesNotMatch(sent[0], /工具调用|Error calling|Status code|404/);
 });
 
-test('QQ sends neutral completion replies and retains tool failure notices', async () => {
+test('QQ sends neutral completion replies without tool failure notices', async () => {
   for (const toolFailed of [false, true]) {
     const sent = [];
     const status = createQqBridgeStatus();
@@ -1246,9 +1244,7 @@ test('QQ sends neutral completion replies and retains tool failure notices', asy
       state: fixture.state,
     });
     await bridge.accept(message());
-    assert.deepEqual(sent, [toolFailed
-      ? '本轮处理已结束，没有文本回复。\n\n---\n\n工具调用「bash」未成功，请检查工具配置或稍后重试。'
-      : '本轮处理已结束，没有文本回复。']);
+    assert.deepEqual(sent, ['本轮处理已结束，没有文本回复。']);
     assert.equal(status.messagesReplied, 1);
     assert.equal(status.lastError, null);
     assert.equal(status.lastMessageError, null);
