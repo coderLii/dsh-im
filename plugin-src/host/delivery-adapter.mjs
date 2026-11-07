@@ -591,7 +591,7 @@ export function createDeliveryAdapter({
         // Listed targets are the candidate range of synced questions and
         // approvals only, so a non-private route never appears here even
         // though mirrored text may be delivered to it.
-        if (!target || !privateConversationKeyMatchesTarget(
+        if (!target || !conversationKeyMatchesTarget(
           channel,
           configured.conversationKey,
           target,
