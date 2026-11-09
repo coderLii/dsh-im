@@ -276,6 +276,7 @@ export class OutboundArtifactRegistry {
   #turns = new Map();
   #stagedTurns = new Map();
   #claimedTurns = new Map();
+  #unboundSender = null;
   #claimSignals = new Map();
   #signalClaims = new Map();
   #consumersByPrompt = new Map();
@@ -396,6 +397,27 @@ export class OutboundArtifactRegistry {
       && this.#consumerForTurn(sessionIdOf(session), turn) !== null;
   }
 
+  /** Channel fallback for turns no channel started. Returns its own unregister. */
+  setUnboundSender(sender) {
+    this.#unboundSender = typeof sender === 'function' ? sender : null;
+    return () => {
+      if (this.#unboundSender === sender) this.#unboundSender = null;
+    };
+  }
+
+  /**
+   * Whether the fallback claims this Session. A sender without `handles` is
+   * treated as claiming every unowned turn.
+   */
+  unboundSenderHandles(session) {
+    if (this.#unboundSender === null || this.hasActiveConsumer(session)) return false;
+    return this.#unboundSender.handles?.(session) !== false;
+  }
+
+  unboundSenderFor(exec) {
+    return this.unboundSenderHandles(exec?.agent?.session) ? this.#unboundSender : null;
+  }
+
   /** A disposed Session cannot have another channel consumer claim its files. */
   disposeSession(session) {
     const sessionId = sessionIdOf(session);
@@ -439,10 +461,7 @@ export class OutboundArtifactRegistry {
     }
 
     const consumer = this.#consumerForTurn(sessionId, turn);
-    const unavailable = () => artifactError(
-      'artifact-consumer-required',
-      'No active IM delivery consumer owns this turn. The file was not queued. Use the host present tool if available to return the file in this conversation.',
-    );
+    const unavailable = unboundDeliveryError;
     if (!consumer) throw unavailable();
 
     const snapshot = await snapshotFile(workspace, requestedPath, exec?.signal);
@@ -636,6 +655,14 @@ export class OutboundArtifactRegistry {
 
 export const outboundArtifactRegistry = new OutboundArtifactRegistry();
 
+/** The refusal both the tool and a channel fallback can return. */
+export function unboundDeliveryError() {
+  return artifactError(
+    'artifact-consumer-required',
+    'No active IM delivery consumer owns this turn. The file was not queued. Use the host present tool if available to return the file in this conversation, or pass a target when the channel supports proactive delivery.',
+  );
+}
+
 /**
  * Build a two-phase tool: execute stages a file; the authoritative tools/result
  * observer commits only a successful native call or successful Code Mode parent.
@@ -653,7 +680,7 @@ export function createOutboundArtifactTool({ registry = outboundArtifactRegistry
   };
   const definition = Object.freeze({
     name: OUTBOUND_ARTIFACT_TOOL,
-    description: 'Register a readable file or generated image for delivery through the current IM conversation after this turn. Requires an active IM delivery consumer; in Web, Desktop, or CLI conversations use the host present tool if available. Existing and newly created files are both valid. Success means queued, not sent; do not claim the user has received the file.',
+    description: 'Register a readable file or generated image for delivery through the current IM conversation. In a chat turn the file is sent after the turn finishes; when no IM delivery consumer owns the turn the channel may send it immediately to the conversation bound to this session. Existing and newly created files are both valid. The result says whether the file was queued or already sent; never claim the user received it before that.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -671,17 +698,22 @@ export function createOutboundArtifactTool({ registry = outboundArtifactRegistry
         additionalProperties: false,
         properties: {
           artifactId: { type: 'string' },
+          sent: { type: 'boolean' },
           fileName: { type: 'string' },
           size: { type: 'number' },
         },
-        required: ['artifactId', 'fileName', 'size'],
+        required: ['fileName', 'size'],
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `Registered ${value.fileName} (${value.size} bytes) for IM delivery after this turn. The file has not been sent yet; describe it as prepared or queued, not sent or received.`,
+        text: value.sent === true
+          ? `Sent ${value.fileName} (${value.size} bytes) to the conversation bound to this session.`
+          : `Registered ${value.fileName} (${value.size} bytes) for IM delivery after this turn. The file has not been sent yet; describe it as prepared or queued, not sent or received.`,
       }],
     },
     async execute(args, exec) {
+      const sender = registry.unboundSenderFor(exec);
+      if (sender !== null) return sender(args, exec);
       const artifact = await registry.stage(args, exec);
       staged.set(exec, artifact);
       return publicArtifact(artifact);
@@ -737,8 +769,11 @@ export function installOutboundArtifactTool(ctx, { registry = outboundArtifactRe
   ctx.systemPrompt.context({
     name: 'dsh-im:return-file',
     order: 115,
-    text: (assembly) => registry.hasActiveConsumer(assembly?.agent?.session)
-      ? `When the user asks to receive a file or generated image, call ${OUTBOUND_ARTIFACT_TOOL} with its path. Existing files can be sent directly; do not recreate or rename a file solely for delivery. This tool only registers the file; the channel uploads and sends it after your turn finishes. In your reply say the file is prepared or queued, never that it has already been sent or received. The channel reports delivery failures separately.`
+    text: (assembly) => (
+      registry.hasActiveConsumer(assembly?.agent?.session)
+      || registry.unboundSenderHandles(assembly?.agent?.session)
+    )
+      ? `When the user asks to receive a file or generated image, call ${OUTBOUND_ARTIFACT_TOOL} with its path. Existing files can be sent directly; do not recreate or rename a file solely for delivery. In a chat turn the channel uploads the file after your turn finishes; when this turn has no IM receiver the channel may send it immediately to the conversation bound to this Session. Say the file is prepared or queued, and only report it as sent when the tool result says so. The channel reports delivery failures separately.`
       : '',
   });
   return true;

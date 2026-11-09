@@ -1,4 +1,6 @@
 import { getGroupHistoryStore } from '../../group-history-runtime.mjs';
+import { createQqUnboundSender } from './unbound-sender.mjs';
+import { outboundArtifactRegistry } from '../../../../src/channels/shared/semantic/artifact.mjs';
 import { getImageInputSettingsStore } from '../../../../src/channels/shared/image-input-settings-store.mjs';
 import { unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -190,6 +192,11 @@ export async function createProductionController(ctx, config = {}, internals = {
     retryDelaysMs: config.retryDelaysMs,
     healthyIntervalMs: config.healthyIntervalMs,
   }).start();
+  // Scheduled and injected turns own no IM delivery consumer, so nothing claims
+  // their files at turn end; the sender reverse-looks the session's conversation.
+  const unregisterUnboundSender = outboundArtifactRegistry.setUnboundSender(
+    createQqUnboundSender({ controller: coreController, workspaces, stateForSync }),
+  );
   return {
     controller,
     deliveryAdapter: createDeliveryAdapter({ dsBot: config.deliveryService?.dsBot, channel: 'qq', workspaces, coreController, stateFor,
@@ -197,6 +204,7 @@ export async function createProductionController(ctx, config = {}, internals = {
       stateForSync }),
     ready: supervisor.ready,
     async close() {
+      unregisterUnboundSender();
       await supervisor.close();
       await controller.close();
       harness.stopManagedProcess();

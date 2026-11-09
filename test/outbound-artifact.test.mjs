@@ -454,10 +454,10 @@ test('Host installer exposes the tool but only guides the current owned IM Turn'
 
   assert.equal(installed, true);
   assert.equal(definition.name, OUTBOUND_ARTIFACT_TOOL);
-  assert.match(definition.description, /active IM delivery consumer/);
-  assert.match(definition.description, /host present tool/);
+  assert.match(definition.description, /IM delivery consumer/);
+  assert.match(definition.description, /conversation bound to this session/);
   assert.match(definition.description, /Existing and newly created files are both valid/);
-  assert.match(definition.description, /Success means queued, not sent/);
+  assert.match(definition.description, /queued or already sent/);
   assert.match(definition.output.render({}, { fileName: 'result.zip', size: 123 })[0].text, /has not been sent yet/);
   assert.equal(context.name, 'dsh-im:return-file');
   const session = { id: 'im-session' };

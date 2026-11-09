@@ -311,3 +311,37 @@ test('QQ runtime enables result-file delivery without per-bot configuration', as
   assert.equal(typeof onArtifact, 'function');
   await runtime.stop();
 });
+
+test('QQ runtime sends proactive media without a reply id', async (t) => {
+  const bot = new FakeBot();
+  const sent = [];
+  bot.sendImage = async (target, source) => { sent.push({ kind: 'image', target, source }); };
+  bot.sendFile = async (target, source, options) => { sent.push({ kind: 'file', target, source, options }); };
+  const runtime = new QqRuntime({
+    config: { botId: 'qq_bot', appId: 'app', ownerUserOpenid: 'owner-openid' },
+    appSecret: 'secret',
+    harness: { ensureRunning: async () => true },
+    state: {},
+    createBot: () => bot,
+    typingMiddleware: () => 'typing',
+    connectTimeoutMs: 100,
+  });
+  t.after(() => runtime.stop());
+  await runtime.start();
+
+  const buffer = Buffer.from('89504e47', 'hex');
+  await runtime.sendProactiveFile(
+    { kind: 'group', route: { groupOpenId: 'group-openid' } },
+    { buffer, fileName: 'star.png' },
+  );
+  assert.deepEqual(sent[0].target, { scope: 'group', targetId: 'group-openid' });
+  // No reply id: that is what keeps proactive media outside the passive window.
+  assert.equal(sent[0].source.msgId, undefined);
+
+  await runtime.sendProactiveFile(
+    { kind: 'user', route: { userOpenId: 'owner-openid' } },
+    { buffer, fileName: 'report.txt' },
+  );
+  assert.equal(sent[1].kind, 'file');
+  assert.deepEqual(sent[1].options, { fileName: 'report.txt' });
+});
