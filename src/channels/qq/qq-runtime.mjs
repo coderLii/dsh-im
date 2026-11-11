@@ -17,6 +17,9 @@ function timeoutError() {
   return error;
 }
 
+/** QQ's image message vs. generic file message is decided by the upload type. */
+const QQ_IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|bmp)$/i;
+
 export function createQqRuntimeStatus() {
   return {
     startedAt: null,
@@ -146,6 +149,30 @@ export class QqRuntime {
       return { sent: true };
     }
     return this.#bot.sendText(replyTarget, text);
+  }
+
+  /** Send an image or file as a proactive message (no `msg_id`, no reply window). */
+  async sendProactiveFile(target, file, { signal } = {}) {
+    const nativeId = target?.kind === 'user'
+      ? (typeof target?.route?.userOpenId === 'string' ? target.route.userOpenId.trim() : '')
+      : target?.kind === 'group'
+        ? (typeof target?.route?.groupOpenId === 'string' ? target.route.groupOpenId.trim() : '')
+        : '';
+    if (!nativeId) {
+      const error = new TypeError('Invalid QQ proactive delivery target');
+      error.code = 'invalid-target';
+      throw error;
+    }
+    if (!this.#status.ready || !this.#bot) {
+      const error = new Error('QQ bot is not connected');
+      error.code = 'bot-not-connected';
+      throw error;
+    }
+    signal?.throwIfAborted();
+    const replyTarget = { scope: target.kind === 'user' ? 'c2c' : 'group', targetId: nativeId };
+    return QQ_IMAGE_FILE.test(file.fileName)
+      ? this.#bot.sendImage(replyTarget, { buffer: file.buffer })
+      : this.#bot.sendFile(replyTarget, { buffer: file.buffer }, { fileName: file.fileName });
   }
 
   async start() {
