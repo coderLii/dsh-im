@@ -1223,6 +1223,10 @@ export class QqHarnessBridge {
     if (!isQqMessageAddressed(message)) return;
 
     const target = message.replyTarget;
+    // A long turn outlives the passive reply window (5 min in a group, 60 min in
+    // a direct chat), and QQ rejects a reply that carries an expired msg_id. Pick
+    // the route at send time so an expired turn falls back to a proactive send.
+    const liveTarget = () => deferredDeliveryTarget(deferredQqTarget(message, target, acceptedAt));
     const promptMessage = preparedMessage
       ?? qqInboundMessage(message, { fetchImpl: this.#fetchImpl });
     const text = promptMessage.content;
@@ -1443,7 +1447,7 @@ export class QqHarnessBridge {
           }
         }
         if (!streamFinished) {
-          const deliveries = await sendMarkdownReply(this.#bot, target, displayAnswer, {
+          const deliveries = await sendMarkdownReply(this.#bot, liveTarget(), displayAnswer, {
             logger: this.#logger,
           });
           textReceipt = createDeliveryReceipt({
@@ -1456,7 +1460,7 @@ export class QqHarnessBridge {
         textSendError = channelDeliveryFailure(error);
         this.#logger.warn?.('[dsh-im:qq] final text delivery failed; continuing with result files:', error);
       }
-      const delivery = await this.#deliverArtifacts(target, messageId, artifacts, textReceipt);
+      const delivery = await this.#deliverArtifacts(liveTarget(), messageId, artifacts, textReceipt);
       const artifactDispatched = delivery.receipt?.artifacts?.some(
         ({ outcome }) => outcome === 'sent' || outcome === 'unknown',
       );
@@ -1490,7 +1494,7 @@ export class QqHarnessBridge {
           this.#logger.warn?.('[dsh-im:qq] unable to cancel a stopped QQ stream:', streamError);
         }
         try {
-          await this.#bot.sendText(target, t('已停止。'));
+          await this.#bot.sendText(liveTarget(), t('已停止。'));
         } catch (sendError) {
           this.#logger.warn?.('[dsh-im:qq] unable to announce a stopped QQ turn:', sendError);
         }
@@ -1517,7 +1521,7 @@ export class QqHarnessBridge {
       try {
         const errorMessage = messageFailureText(failure);
         await this.#bot.sendText(
-          target,
+          liveTarget(),
           batchFailureMessage ? `${errorMessage}\n\n${batchFailureMessage}` : errorMessage,
         );
         await markMessageSeen();
